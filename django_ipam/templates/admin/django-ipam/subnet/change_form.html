@@ -2,6 +2,16 @@
 {% load i18n admin_urls %}
 {% load static %}
 
+{% block object-tools-items %}
+{{ block.super }}
+<li>
+  <a href="{% url 'admin:export_ipaddress' subnet.id %}">Export Ip address</a>
+</li>
+<li>
+  <a href="{% url 'admin:import_ipaddress' %}?_popup=1" onclick="return showAddAnotherPopup(this);">Import Ip address</a>
+</li>
+{% endblock %}
+
 {% block after_related_objects %}
   <div id="graph"></div>
   {% if show_visual %}

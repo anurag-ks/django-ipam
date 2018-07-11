@@ -1,3 +1,5 @@
+import csv
+from io import StringIO
 from ipaddress import ip_address, ip_network
 
 import swapper
@@ -10,6 +12,7 @@ from .fields import NetworkField
 
 
 class AbstractSubnet(TimeStampedEditableModel):
+    name = models.CharField(max_length=100, blank=True)
     subnet = NetworkField(db_index=True,
                           help_text=_('Subnet in CIDR notation, eg: "10.0.0.0/24" '
                                       'for IPv4 and "fdb6:21b:a477::9f7/64" for IPv6'))
@@ -76,3 +79,29 @@ class AbstractIpAddress(TimeStampedEditableModel):
         for ip in swapper.load_model("django_ipam", "IpAddress").objects.filter().values():
             if self.id != ip["id"] and ip_address(self.ip_address) == ip_address(ip["ip_address"]):
                 raise ValidationError({'ip_address': _('IP address already used.')})
+
+    def export_csv(self, subnet_id, writer, queryset):
+        IpAddress = swapper.load_model("django_ipam", "IpAddress")
+        subnet = swapper.load_model("django_ipam", "Subnet").objects.get(pk=subnet_id)
+        writer.writerow([subnet.name, ])
+        writer.writerow([subnet.subnet, ])
+        writer.writerow('')
+        fields = [IpAddress._meta.get_field('ip_address'), IpAddress._meta.get_field('description')]
+        writer.writerow(field.name for field in fields)
+        for obj in queryset:
+            row = []
+            for field in fields:
+                row.append(str(getattr(obj, field.name)))
+            writer.writerow(row)
+
+    def import_csv(self, file):
+        IpAddress = swapper.load_model("django_ipam", "IpAddress")
+        Subnet = swapper.load_model("django_ipam", "Subnet")
+        reader = csv.reader(StringIO(file.read().decode('utf-8')), delimiter=',')
+        subnet = Subnet.objects.get_or_create(name=next(reader)[0].strip(), subnet=next(reader)[0].strip())[0]
+        next(reader)
+        next(reader)
+        for row in reader:
+            IpAddress.objects.get_or_create(subnet=subnet,
+                                            ip_address=row[0].strip(),
+                                            description=row[1].strip())

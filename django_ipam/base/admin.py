@@ -1,12 +1,16 @@
+import csv
 from ipaddress import IPv4Network, IPv6Network, ip_address
 
 import swapper
 from django import forms
 from django.contrib.admin import ModelAdmin
 from django.http import HttpResponse
-from django.urls import reverse
+from django.shortcuts import render
+from django.urls import path, re_path, reverse
 from django.utils.translation import gettext_lazy as _
 from openwisp_utils.admin import TimeReadonlyAdminMixin
+
+from .forms import IpAddressImportForm
 
 Subnet = swapper.load_model("django_ipam", "Subnet")
 IpAddress = swapper.load_model("django_ipam", "IpAddress")
@@ -14,6 +18,7 @@ IpAddress = swapper.load_model("django_ipam", "IpAddress")
 
 class AbstractSubnetAdmin(TimeReadonlyAdminMixin, ModelAdmin):
     change_form_template = "admin/django-ipam/subnet/change_form.html"
+    change_list_template = "admin/django-ipam/subnet/change_list.html"
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
         instance = Subnet.objects.get(pk=object_id)
@@ -41,9 +46,42 @@ class AbstractSubnetAdmin(TimeReadonlyAdminMixin, ModelAdmin):
             values = [used, available]
             extra_context = {'labels': labels,
                              'values': values,
+                             'subnet': instance,
                              'used_ip': used_ip}
 
         return super(AbstractSubnetAdmin, self).change_view(request, object_id, form_url, extra_context)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            re_path(r'^(?P<subnet_id>[^/]+)/export-ipaddress/',
+                    self.export_ipaddress,
+                    name="export_ipaddress"),
+            path('import/', self.import_ipaddress, name="import_ipaddress"),
+        ]
+        return custom_urls + urls
+
+    def export_ipaddress(self, request, subnet_id):
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="ip_address.csv"'
+
+        writer = csv.writer(response)
+        IpAddress.export_csv(self, subnet_id, writer, IpAddress.objects.filter(subnet=subnet_id))
+        return response
+
+    def import_ipaddress(self, request):
+        form = IpAddressImportForm()
+        form_template = 'admin/django-ipam/subnet/import.html'
+        if request.method == 'POST':
+            form = IpAddressImportForm(request.POST, request.FILES)
+            if form.is_valid():
+                file = request.FILES['csvfile']
+                IpAddress.import_csv(self, file)
+                return HttpResponse('''
+                   <script type="text/javascript">
+                      opener.dismissAddAnotherPopup(window);
+                   </script>''')
+        return render(request, form_template, {'form': form})
 
     class Media:
         js = ('django-ipam/js/custom.js',)
